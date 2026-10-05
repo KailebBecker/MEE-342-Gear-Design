@@ -123,8 +123,8 @@ function GearVisualization({ result, dimension }) {
     <circle cx={x1} cy={y} r="3" fill="#e0e8ed" /><circle cx={x2} cy={y} r="3" fill="#e0e8ed" />
     <line x1={x1} y1="207" x2={x2} y2="207" stroke="#a2b2c1" /><line x1={x1} y1="201" x2={x1} y2="214" stroke="#a2b2c1" /><line x1={x2} y1="201" x2={x2} y2="214" stroke="#a2b2c1" />
     <text x={x1} y="229" fill="#c5d2dc" fontSize="10" textAnchor="middle">Center {dimension(result.centerDistanceMm)}</text>
-    <text x={x1} y="20" fill="#5dc8b1" fontSize="10" textAnchor="middle">Driver {result.pinionTeeth}T · OD {dimension(result.outsideDiameterPinionMm)}</text>
-    <text x={x2} y="20" fill="#e7ad59" fontSize="10" textAnchor="middle">Driven {result.gearTeeth}T · OD {dimension(result.outsideDiameterGearMm)}</text>
+    <text x="24" y="20" fill="#5dc8b1" fontSize="10" textAnchor="start">Driver · {result.pinionTeeth}T</text>
+    <text x="516" y="20" fill="#e7ad59" fontSize="10" textAnchor="end">Driven · {result.gearTeeth}T</text>
   </svg>;
 }
 
@@ -276,7 +276,7 @@ export default function ShifterWorkflow() {
       {result && <>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 130px), 1fr))", gap: 8, margin: "13px 0" }}><Metric label="Pinion OD" value={dimension(result.outsideDiameterPinionMm)} /><Metric label="Driven OD" value={dimension(result.outsideDiameterGearMm)} /><Metric label="Center distance" value={dimension(result.centerDistanceMm)} /></div>
         <GearVisualization result={result} dimension={dimension} />
-        <p style={{ color: "#8596a3", fontSize: 9, margin: "5px 0 0" }}>Dashed circles show pitch diameters. Tooth profile is schematic, not an involute drawing. Driver {result.pinionTeeth}T · driven {result.gearTeeth}T · {result.ratio.toFixed(2)}:1.</p>
+        <p style={{ color: "#8596a3", fontSize: 9, lineHeight: 1.5, margin: "5px 0 0" }}>Driver {result.pinionTeeth}T · OD {dimension(result.outsideDiameterPinionMm)} · driven {result.gearTeeth}T · OD {dimension(result.outsideDiameterGearMm)} · center {dimension(result.centerDistanceMm)} · reduction {result.ratio.toFixed(2)}:1. Dashed circles show pitch diameters; tooth form is schematic, not an involute drawing.</p>
       </>}
       <QuickCandidates inputs={inputs} selected={inputs} onChoose={selectPair} dimension={dimension} />
     </section>
