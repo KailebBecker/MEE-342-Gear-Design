@@ -2,19 +2,20 @@ import { useState } from "react";
 import { MATERIALS } from "./gearCalculations.js";
 import { calculateShifterDesign, SHIFTER_DEFAULTS } from "./shifterDesign.js";
 
-const PAIRS = [[12, 60], [14, 70], [16, 80]];
+const PAIRS = [[12, 60], [14, 70], [15, 75], [16, 80], [18, 90]];
 const inputStyle = { width: "100%", boxSizing: "border-box", padding: "8px 9px", border: "1px solid #26445f", borderRadius: 4, background: "#061321", color: "#e6edf3", fontSize: 13 };
 const labelStyle = { display: "grid", gap: 5, color: "#9aabba", fontSize: 12 };
 const panelStyle = { borderTop: "1px solid #263b4d", padding: "16px 0" };
 const tableStyle = { width: "100%", borderCollapse: "collapse", fontSize: 12, textAlign: "left" };
 const ASSUMED_KEYS = [
-  "motorSpeedRpm", "faceWidthMm", "materialKey", "shiftCycles", "qualityNumber",
+  "motorKv", "operatingVoltageV", "faceWidthMm", "materialKey", "assumedMaterialKey", "shiftCycles", "qualityNumber",
   "overloadFactor", "meshEfficiency", "bendingSafetyFactorRequired",
   "contactSafetyFactorRequired", "reliability", "temperatureC", "rimThicknessFactor",
   "pinionRevolutionsPerShift", "sameMaterialForPair", "materialRatings", "kmBasis",
 ];
 const VERIFIED_AS = {
-  motorSpeedRpm: "USER INPUT",
+  motorKv: "MANUFACTURER DATA",
+  operatingVoltageV: "USER INPUT",
   faceWidthMm: "MANUFACTURER DATA",
   materialKey: "MANUFACTURER DATA",
   shiftCycles: "USER INPUT",
@@ -37,34 +38,34 @@ function BasisTag({ basis }) {
   return <span style={{ color: colors[basis] || "#9aabba", fontSize: 9, fontWeight: 700, letterSpacing: ".04em", whiteSpace: "nowrap" }}>{basis}</span>;
 }
 
-function FieldHeading({ id, label, basis, verified, onVerify, verifiedAs }) {
+function FieldHeading({ id, label, basis, verified, onVerify, verifiedAs, canConfirm = true }) {
   const displayedBasis = basis === "ASSUMED" && verified ? verifiedAs : basis;
   return <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
     <label htmlFor={id}>{label}</label>
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
       <BasisTag basis={displayedBasis} />
-      {basis === "ASSUMED" && <label style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#8798a7", fontSize: 10 }}><input type="checkbox" checked={verified} onChange={onVerify} aria-label={`Confirm ${label}`} />Confirm</label>}
+      {basis === "ASSUMED" && <label style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#8798a7", fontSize: 10 }}><input type="checkbox" checked={verified} onChange={onVerify} disabled={!canConfirm} aria-label={`Confirm ${label}`} />Confirm</label>}
     </span>
   </div>;
 }
 
-function NumberField({ id, label, unit, value, onChange, min, max, step = "any", basis = "USER INPUT", verified, onVerify, verifiedAs }) {
+function NumberField({ id, label, unit, value, onChange, min, max, step = "any", basis = "USER INPUT", verified, onVerify, verifiedAs, canConfirm = true, readOnly = false }) {
   return <div style={labelStyle}>
-    <FieldHeading id={id} label={label} basis={basis} verified={verified} onVerify={onVerify} verifiedAs={verifiedAs} />
-    <span style={{ display: "flex", gap: 7, alignItems: "center" }}><input id={id} aria-label={label} style={inputStyle} type="number" value={value} min={min} max={max} step={step} onChange={onChange} /><span style={{ minWidth: 26, color: "#718394" }}>{unit}</span></span>
+    <FieldHeading id={id} label={label} basis={basis} verified={verified} onVerify={onVerify} verifiedAs={verifiedAs} canConfirm={canConfirm} />
+    <span style={{ display: "flex", gap: 7, alignItems: "center" }}><input id={id} aria-label={label} style={{ ...inputStyle, opacity: readOnly ? 0.8 : 1 }} type="number" value={value} min={min} max={max} step={step} onChange={onChange} readOnly={readOnly} /><span style={{ minWidth: 26, color: "#718394" }}>{unit}</span></span>
   </div>;
 }
 
-function SelectField({ id, label, value, onChange, options, basis, verified, onVerify, verifiedAs }) {
+function SelectField({ id, label, value, onChange, options, basis, verified, onVerify, verifiedAs, canConfirm = true }) {
   return <div style={labelStyle}>
-    <FieldHeading id={id} label={label} basis={basis} verified={verified} onVerify={onVerify} verifiedAs={verifiedAs} />
+    <FieldHeading id={id} label={label} basis={basis} verified={verified} onVerify={onVerify} verifiedAs={verifiedAs} canConfirm={canConfirm} />
     <select id={id} aria-label={label} style={inputStyle} value={value} onChange={onChange}>{options.map((option) => typeof option === "object" ? <option key={option.value} value={option.value}>{option.label}</option> : <option key={option}>{option}</option>)}</select>
   </div>;
 }
 
-function AssumptionConfirmation({ label, checked, onChange, verifiedAs }) {
+function AssumptionConfirmation({ label, checked, onChange, verifiedAs, disabled = false }) {
   return <label style={{ display: "flex", alignItems: "center", gap: 7, color: "#a9bac7", fontSize: 11 }}>
-    <input type="checkbox" checked={checked} onChange={onChange} aria-label={`Confirm ${label}`} />
+    <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} aria-label={`Confirm ${label}`} />
     <span>{label}</span><BasisTag basis={checked ? verifiedAs : "ASSUMED"} />
   </label>;
 }
@@ -123,20 +124,38 @@ function CheckStatus({ title, passed, detail }) {
   </div>;
 }
 
+function StrengthStatus({ title, passed, detail, preliminary }) {
+  const color = passed ? "#72d6a0" : "#ff8a7a";
+  return <div style={{ border: `1px solid ${passed ? "#347a5a" : "#8e4843"}`, borderLeft: `3px solid ${color}`, padding: "10px 12px", background: passed ? "#0a211b" : "#281819", minWidth: 0 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 5, color: "#b7c6d1", fontSize: 11 }}><span>{title}</span>{preliminary && <span style={{ color: "#e5b567", fontSize: 9 }}>PRELIMINARY</span>}</div>
+    <strong style={{ display: "block", color, fontSize: 15, margin: "4px 0" }}>{passed ? "PASS" : "FAIL"}</strong>
+    <div style={{ color: "#91a2af", fontSize: 10, lineHeight: 1.4 }}>{detail}</div>
+  </div>;
+}
+
+function GeometryStatus({ supported, detail }) {
+  const color = supported ? "#72d6a0" : "#e5b567";
+  return <div style={{ border: `1px solid ${supported ? "#347a5a" : "#ad7b35"}`, borderLeft: `3px solid ${color}`, padding: "10px 12px", background: supported ? "#0a211b" : "#282116", minWidth: 0 }}>
+    <div style={{ color: "#b7c6d1", fontSize: 11 }}>Standard Geometry</div>
+    <strong style={{ display: "block", color, fontSize: 13, margin: "4px 0" }}>{supported ? "SUPPORTED" : "STANDARD GEOMETRY WARNING"}</strong>
+    <div style={{ color: "#91a2af", fontSize: 10, lineHeight: 1.4 }}>{detail}</div>
+  </div>;
+}
+
 function Comparison({ inputs }) {
   const rows = PAIRS.map(([pinionTeeth, gearTeeth]) => calculateShifterDesign({ ...inputs, pinionTeeth, gearTeeth }).result);
   return <section style={panelStyle}>
     <h2 style={{ color: "#e2eaf0", fontSize: 15, margin: "0 0 5px" }}>Gear-pair comparison</h2>
-    <p style={{ color: "#7d909f", fontSize: 11, margin: "0 0 12px" }}>Same material, loading, face width, DP, quality, and life assumptions for each pair.</p>
-    <div style={{ overflowX: "auto" }}><table style={{ ...tableStyle, minWidth: 760 }}><thead><tr>{["Pair", "OD pinion / gear", "Center", "Ft", "Bending stress max", "Contact stress", "SF bending", "SF contact", "Torque margin", "Status"].map((heading) => <th key={heading} style={{ color: "#7e94a5", padding: "8px 5px", borderBottom: "1px solid #34495a", fontWeight: 600 }}>{heading}</th>)}</tr></thead>
+    <p style={{ color: "#7d909f", fontSize: 11, margin: "0 0 12px" }}>Strength values are PRELIMINARY and depend on the assumed material and operating factors. Same DP, pressure angle, face width, loading, and calculation basis for all pairs.</p>
+    <div style={{ overflowX: "auto" }}><table style={{ ...tableStyle, minWidth: 850 }}><thead><tr>{["Pair", "OD pinion / gear", "Center", "Ft", "Bending stress · PRELIMINARY", "Contact stress · PRELIMINARY", "SF bending", "SF contact", "Standard Geometry", "Torque margin"].map((heading) => <th key={heading} style={{ color: "#7e94a5", padding: "8px 5px", borderBottom: "1px solid #34495a", fontWeight: 600 }}>{heading}</th>)}</tr></thead>
       <tbody>{rows.map((row) => <tr key={`${row.pinionTeeth}-${row.gearTeeth}`} style={{ borderBottom: "1px solid #1e3040" }}>
         <td style={{ padding: "9px 5px", color: "#e2eaf0" }}>{row.pinionTeeth}T / {row.gearTeeth}T</td>
         <td>{row.outsideDiameterPinionMm.toFixed(1)} / {row.outsideDiameterGearMm.toFixed(1)} mm</td>
         <td>{row.centerDistanceMm.toFixed(1)} mm</td><td>{row.tangentialForceN.toFixed(0)} N</td>
         <td>{Math.max(row.bendingPinionMPa, row.bendingGearMPa).toFixed(1)} MPa</td><td>{row.contactMPa.toFixed(1)} MPa</td>
         <td>{row.bendingSafety.toFixed(2)}</td><td>{row.contactSafety.toFixed(2)}</td>
+        <td style={{ color: row.geometrySupported ? "#72d6a0" : "#e5b567", fontWeight: 700 }}>{row.geometrySupported ? "SUPPORTED" : "WARNING"}</td>
         <td style={{ color: row.torquePass ? "#72d6a0" : "#ff8a7a" }}>{row.torqueMarginNm.toFixed(2)} N·m</td>
-        <td style={{ color: row.pass ? "#72d6a0" : "#ff8a7a", fontWeight: 700 }}>{row.pass ? "PASS" : "FAIL"}</td>
       </tr>)}</tbody></table></div>
   </section>;
 }
@@ -159,8 +178,13 @@ export default function ShifterMode() {
     verifiedAs: VERIFIED_AS[key],
   });
   const format = (value, digits = 2) => Number.isFinite(value) ? value.toFixed(digits) : "—";
-  const assumptionsRemain = ASSUMED_KEYS.some((key) => !verified[key]);
-  const unconfirmedCount = ASSUMED_KEYS.filter((key) => !verified[key]).length;
+  const activeAssumptions = ASSUMED_KEYS.filter((key) => {
+      if (inputs.motorSpeedMode === "direct" && ["motorKv", "operatingVoltageV"].includes(key)) return false;
+      if (inputs.materialKey !== "Unknown / Not Selected" && key === "assumedMaterialKey") return false;
+      return true;
+    });
+  const assumptionsRemain = activeAssumptions.some((key) => !verified[key]);
+  const unconfirmedCount = activeAssumptions.filter((key) => !verified[key]).length;
 
   return <main style={{ color: "#e2eaf0", textAlign: "left" }}>
     <header style={{ marginBottom: 18 }}>
@@ -173,17 +197,22 @@ export default function ShifterMode() {
       <h2 style={{ color: "#e2eaf0", fontSize: 15, margin: "0 0 12px" }}>Basic Design Inputs</h2>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 210px), 1fr))", gap: "12px 18px" }}>
         <NumberField id="motorTorqueNm" label="Motor torque" unit="N·m" value={inputs.motorTorqueNm} onChange={update("motorTorqueNm")} min="0.01" />
-        <NumberField id="motorSpeedRpm" label="Motor speed" unit="rpm" value={inputs.motorSpeedRpm} onChange={update("motorSpeedRpm")} min="1" {...fieldBasis("motorSpeedRpm")} />
+        <SelectField id="motorSpeedMode" label="Motor speed source" value={inputs.motorSpeedMode} onChange={update("motorSpeedMode")} options={[{ value: "direct", label: "Direct RPM input" }, { value: "estimated", label: "Estimate from Kv × voltage" }]} />
+        {inputs.motorSpeedMode === "direct" ? <NumberField id="motorSpeedRpm" label="Motor speed" unit="rpm" value={inputs.motorSpeedRpm} onChange={update("motorSpeedRpm")} min="1" /> : <>
+          <NumberField id="motorKv" label="Motor Kv" unit="rpm/V" value={inputs.motorKv} onChange={update("motorKv")} min="1" {...fieldBasis("motorKv")} />
+          <NumberField id="operatingVoltageV" label="Motor operating voltage" unit="V" value={inputs.operatingVoltageV} onChange={update("operatingVoltageV")} min="1" {...fieldBasis("operatingVoltageV")} />
+          <NumberField id="estimatedMotorSpeedRpm" label="Estimated no-load motor speed" unit="rpm · estimate" value={Number(inputs.motorKv) * Number(inputs.operatingVoltageV)} readOnly basis="DERIVED" />
+        </>}
         <NumberField id="pinionTeeth" label="Driver / pinion teeth" unit="teeth" value={inputs.pinionTeeth} onChange={update("pinionTeeth")} min="12" max="200" step="1" />
         <NumberField id="gearTeeth" label="Driven gear teeth" unit="teeth" value={inputs.gearTeeth} onChange={update("gearTeeth")} min="12" max="200" step="1" />
         <NumberField id="diametralPitch" label="Diametral pitch" unit="teeth/in" value={inputs.diametralPitch} onChange={update("diametralPitch")} min="4" max="80" />
         <NumberField id="pressureAngleDeg" label="Pressure angle" unit="degrees" value={inputs.pressureAngleDeg} onChange={update("pressureAngleDeg")} min="14.5" max="30" />
         <NumberField id="faceWidthMm" label="Face width" unit="mm" value={inputs.faceWidthMm} onChange={update("faceWidthMm")} min="0.1" {...fieldBasis("faceWidthMm")} />
-        <SelectField id="materialKey" label="Gear material (both gears)" value={inputs.materialKey} onChange={update("materialKey")} options={Object.keys(MATERIALS)} {...fieldBasis("materialKey")} />
+        <SelectField id="materialKey" label="Gear material (both gears)" value={inputs.materialKey} onChange={update("materialKey")} options={["Unknown / Not Selected", ...Object.keys(MATERIALS)]} canConfirm={inputs.materialKey !== "Unknown / Not Selected"} {...fieldBasis("materialKey")} />
         <NumberField id="requiredOutputTorqueNm" label="Required output torque" unit="N·m" value={inputs.requiredOutputTorqueNm} onChange={update("requiredOutputTorqueNm")} min="0.01" />
         <NumberField id="shiftCycles" label="Design shift count" unit="shifts" value={inputs.shiftCycles} onChange={update("shiftCycles")} min="1" step="1" {...fieldBasis("shiftCycles")} />
       </div>
-      <p style={{ color: "#74899a", fontSize: 11, lineHeight: 1.5, margin: "13px 0 0" }}>The 6480 rpm speed is estimated from 270 kV × assumed 24 V no-load. Face width and material are preliminary selections, not verified gear specifications. Candidate tooth counts, DP, and pressure angle are user-entered design values.</p>
+      <p style={{ color: "#74899a", fontSize: 11, lineHeight: 1.5, margin: "13px 0 0" }}>{inputs.motorSpeedMode === "estimated" ? `Estimated no-load RPM = ${inputs.motorKv} Kv × ${inputs.operatingVoltageV} V. This is a no-load estimate; loaded speed depends on the motor/controller operating point.` : "Motor RPM is directly specified; no Kv voltage-based estimate is applied."} Face width remains an assumption until verified from a gear specification. Gear material is unknown until a manufacturer specification is selected; the temporary analysis material is separately identified below.</p>
     </section>
 
     <details style={{ ...panelStyle, borderBottom: "1px solid #263b4d" }}>
@@ -191,6 +220,7 @@ export default function ShifterMode() {
       <p style={{ color: "#9aabba", fontSize: 11, lineHeight: 1.55, margin: "10px 0 14px" }}>These preliminary assumptions complete the Shigley analysis; replace or confirm them using the selected gear data and actual operating conditions. Confirming a value records your review, but does not independently verify the calculation model.</p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 210px), 1fr))", gap: "12px 18px" }}>
         <NumberField id="qualityNumber" label="Gear quality Qv" unit="AGMA" value={inputs.qualityNumber} onChange={update("qualityNumber")} min="5" max="12" {...fieldBasis("qualityNumber")} />
+        <SelectField id="assumedMaterialKey" label="Temporary assumed analysis material" value={inputs.assumedMaterialKey} onChange={update("assumedMaterialKey")} options={Object.keys(MATERIALS)} {...fieldBasis("assumedMaterialKey")} canConfirm={false} />
         <NumberField id="overloadFactor" label="Overload factor Ko" unit="-" value={inputs.overloadFactor} onChange={update("overloadFactor")} min="1" max="5" {...fieldBasis("overloadFactor")} />
         <NumberField id="meshEfficiency" label="Mesh efficiency" unit="0–1" value={inputs.meshEfficiency} onChange={update("meshEfficiency")} min="0.01" max="1" step="0.01" {...fieldBasis("meshEfficiency")} />
         <NumberField id="bendingSafetyFactorRequired" label="Required bending safety factor" unit="-" value={inputs.bendingSafetyFactorRequired} onChange={update("bendingSafetyFactorRequired")} min="0.1" step="0.1" {...fieldBasis("bendingSafetyFactorRequired")} />
@@ -201,8 +231,8 @@ export default function ShifterMode() {
         <NumberField id="pinionRevolutionsPerShift" label="Loaded pinion revolutions / shift" unit="rev/shift" value={inputs.pinionRevolutionsPerShift} onChange={update("pinionRevolutionsPerShift")} min="0.01" step="0.1" {...fieldBasis("pinionRevolutionsPerShift")} />
       </div>
       <div style={{ display: "grid", gap: 9, marginTop: 14, paddingTop: 12, borderTop: "1px solid #203547" }}>
-        <AssumptionConfirmation label="Both gears use the selected material" checked={verified.sameMaterialForPair} onChange={confirm("sameMaterialForPair")} verifiedAs={VERIFIED_AS.sameMaterialForPair} />
-        <AssumptionConfirmation label="Project-library allowable stresses match the gear manufacturer's material and heat-treatment ratings" checked={verified.materialRatings} onChange={confirm("materialRatings")} verifiedAs={VERIFIED_AS.materialRatings} />
+        <AssumptionConfirmation label="Both gears use the selected material" checked={verified.sameMaterialForPair} onChange={confirm("sameMaterialForPair")} verifiedAs={VERIFIED_AS.sameMaterialForPair} disabled={inputs.materialKey === "Unknown / Not Selected"} />
+        <AssumptionConfirmation label="Project-library allowable stresses match the gear manufacturer's material and heat-treatment ratings" checked={verified.materialRatings} onChange={confirm("materialRatings")} verifiedAs={VERIFIED_AS.materialRatings} disabled={inputs.materialKey === "Unknown / Not Selected"} />
         <AssumptionConfirmation label="The shifter housing/alignment matches the precision-enclosed, uncrowned Km assumption" checked={verified.kmBasis} onChange={confirm("kmBasis")} verifiedAs={VERIFIED_AS.kmBasis} />
       </div>
     </details>
@@ -217,13 +247,13 @@ export default function ShifterMode() {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 175px), 1fr))", gap: 9, marginBottom: 12 }}>
           <CheckStatus title="Output Torque" passed={result.torquePass} detail={`${format(result.outputTorqueNm)} / ${format(result.requiredOutputTorqueNm)} N·m required · margin ${format(result.torqueMarginNm)} N·m`} />
-          <CheckStatus title="Bending Strength" passed={result.bendingPass} detail={`Minimum SF ${format(result.bendingSafety, 2)} / ${format(result.bendingSafetyFactorRequired, 2)} required`} />
-          <CheckStatus title="Contact Strength" passed={result.contactPass} detail={`SF ${format(result.contactSafety, 2)} / ${format(result.contactSafetyFactorRequired, 2)} required`} />
-          <CheckStatus title="Standard Geometry" passed={result.geometrySupported} detail={`${result.pinionTeeth}T pinion · minimum ${result.minimumTeeth}T without profile shift`} />
+          <StrengthStatus title="Bending Strength" passed={result.bendingPass} preliminary={assumptionsRemain} detail={`Minimum SF ${format(result.bendingSafety, 2)} / ${format(result.bendingSafetyFactorRequired, 2)} required`} />
+          <StrengthStatus title="Contact Strength" passed={result.contactPass} preliminary={assumptionsRemain} detail={`SF ${format(result.contactSafety, 2)} / ${format(result.contactSafetyFactorRequired, 2)} required`} />
+            <GeometryStatus supported={result.geometrySupported} detail={result.geometrySupported ? `${result.pinionTeeth}T pinion meets the ${result.minimumTeeth}T minimum.` : `${result.pinionTeeth}T pinion is below the ${result.minimumTeeth}T minimum for ${result.pressureAngleDeg}° standard full-depth involute teeth. Investigate profile modification or a different tooth count; profile shift is not assumed.`} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "10px 12px", background: result.pass ? "#0a211b" : "#281819", border: `1px solid ${result.pass ? "#347a5a" : "#8e4843"}`, marginBottom: 14 }}>
           <strong style={{ color: "#dce5eb", fontSize: 12 }}>Overall result</strong>
-          <strong style={{ color: result.pass ? "#72d6a0" : "#ff8a7a", fontSize: 13 }}>{result.pass ? "PASS" : "FAIL"}</strong>
+            <strong style={{ color: result.pass ? "#72d6a0" : "#ff8a7a", fontSize: 13 }}>{result.pass ? (result.geometrySupported ? "PASS" : "PASS WITH STANDARD GEOMETRY WARNING") : "FAIL"}</strong>
         </div>
         <p style={{ color: "#8193a2", fontSize: 10, lineHeight: 1.45, margin: "0 0 14px" }}>Output torque is checked directly against the required torque. Bending and contact safety factors apply only to their respective gear-strength checks; they are not multiplied into the torque requirement.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))", gap: 18 }}>
@@ -242,8 +272,9 @@ export default function ShifterMode() {
             </tbody></table>
           </div>
           <div>
-            <h3 style={{ color: "#91a6b6", fontSize: 12, margin: "0 0 5px" }}>Tooth loads and stress</h3>
+            <h3 style={{ color: "#91a6b6", fontSize: 12, margin: "0 0 5px" }}>Tooth loads and stress{assumptionsRemain ? " · PRELIMINARY" : ""}</h3>
             <table style={tableStyle}><tbody>
+              <OutputRow label={inputs.motorSpeedMode === "estimated" ? "Estimated no-load speed" : "Specified motor speed"} value={format(result.motorSpeedUsedRpm, 1)} unit="rpm" />
               <OutputRow label="Pitch-line velocity" value={format(result.velocityMs, 3)} unit="m/s" />
               <OutputRow label="Tangential / radial / normal force" value={`${format(result.tangentialForceN, 1)} / ${format(result.radialForceN, 1)} / ${format(result.normalForceN, 1)} N`} />
               <OutputRow label="Design tangential load Ko·Kv·Wt" value={format(result.designLoadN, 1)} unit="N" />
@@ -276,9 +307,10 @@ export default function ShifterMode() {
               <OutputRow label="KL bending life · DERIVED" value={format(result.factors.KL, 4)} /><OutputRow label="KR reliability · DERIVED" value={format(result.factors.KR, 3)} />
               <OutputRow label="KT temperature · DERIVED" value={format(result.factors.KT, 3)} /><OutputRow label="Life cycles · DERIVED" value={`${format(result.shiftCycles, 0)} shifts × ${format(result.pinionRevolutionsPerShift, 2)} rev/shift`} />
               <OutputRow label="Resulting pinion load cycles" value={format(result.lifeCycles, 0)} unit="cycles" /><OutputRow label="Unshifted minimum teeth" value={result.minimumTeeth} />
-              <OutputRow label={`Material σb number · ${verified.materialRatings ? "MANUFACTURER DATA" : "ASSUMED PROJECT LIBRARY"}`} value={format(MATERIALS[result.materialKey].sigma_b, 1)} unit="MPa" />
-              <OutputRow label={`Material σc number · ${verified.materialRatings ? "MANUFACTURER DATA" : "ASSUMED PROJECT LIBRARY"}`} value={format(MATERIALS[result.materialKey].sigma_c, 1)} unit="MPa" />
-              <OutputRow label="Material library hardness" value={MATERIALS[result.materialKey].HB} unit="HB" />
+              <OutputRow label={`Analysis material${result.materialKey === "Unknown / Not Selected" ? " · TEMPORARY ASSUMPTION" : " · SELECTED GRADE"}`} value={result.effectiveMaterialKey} />
+              <OutputRow label={`Material σb number · ${verified.materialRatings ? "MANUFACTURER DATA" : "ASSUMED PROJECT LIBRARY"}`} value={format(MATERIALS[result.effectiveMaterialKey].sigma_b, 1)} unit="MPa" />
+              <OutputRow label={`Material σc number · ${verified.materialRatings ? "MANUFACTURER DATA" : "ASSUMED PROJECT LIBRARY"}`} value={format(MATERIALS[result.effectiveMaterialKey].sigma_c, 1)} unit="MPa" />
+              <OutputRow label="Material library hardness" value={MATERIALS[result.effectiveMaterialKey].HB} unit="HB" />
               <OutputRow label="Geometry applicability" value={result.geometrySupported ? "Within basic limit" : "Undercut risk / unsupported"} bad={!result.geometrySupported} />
             </tbody></table>
           </div>

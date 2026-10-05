@@ -11,6 +11,22 @@ test("candidate geometry reports the 5:1 ratio and 20 DP dimensions", () => {
   assert.equal(result.centerDistanceMm, 45.72);
   assert.ok(Math.abs(result.outsideDiameterPinionMm - 17.78) < 1e-10);
   assert.ok(Math.abs(result.outsideDiameterGearMm - 78.74) < 1e-10);
+  assert.equal(result.motorSpeedUsedRpm, 3240);
+  assert.equal(result.motorSpeedEstimateRpm, 3240);
+});
+
+test("direct RPM mode does not substitute a Kv-voltage estimate", () => {
+  const { result } = calculateShifterDesign({ motorSpeedMode: "direct", motorSpeedRpm: 1800, operatingVoltageV: 48 });
+  assert.equal(result.motorSpeedUsedRpm, 1800);
+  assert.equal(result.motorSpeedEstimateRpm, 12960);
+  assert.equal(result.outputSpeedRpm, 360);
+});
+
+test("unknown gear material uses a clearly reported temporary calculation material", () => {
+  const { result, warnings } = calculateShifterDesign();
+  assert.equal(result.materialKey, "Unknown / Not Selected");
+  assert.equal(result.effectiveMaterialKey, "Grade 1 Steel (HB 180)");
+  assert.ok(warnings.some((warning) => warning.includes("Actual gear material is not selected")));
 });
 
 test("output torque includes reduction and mesh efficiency", () => {
@@ -29,7 +45,7 @@ test("torque, bending, and contact checks are independent", () => {
   }).result;
 
   assert.equal(candidate.torquePass, false);
-  assert.equal(candidate.bendingPass, true);
+  assert.equal(candidate.bendingPass, false);
   assert.equal(candidate.contactPass, false);
   assert.equal(lowerTorqueRequirement.torquePass, true);
   assert.equal(lowerTorqueRequirement.bendingPass, candidate.bendingPass);
@@ -45,7 +61,25 @@ test("12-tooth pinion remains calculable but cannot receive geometry PASS", () =
   assert.equal(result.geometrySupported, false);
   assert.equal(result.minimumTeeth, 18);
   assert.equal(result.pass, false);
-  assert.ok(warnings.some((warning) => warning.includes("undercut limit")));
+  assert.ok(warnings.some((warning) => warning.includes("STANDARD GEOMETRY WARNING")));
+});
+
+test("standard geometry warning does not automatically fail otherwise passing structural checks", () => {
+  const { result } = calculateShifterDesign({
+    motorTorqueNm: 0.1,
+    requiredOutputTorqueNm: 0.4,
+    faceWidthMm: 100,
+    materialKey: "Grade 2 Steel (HB 360)",
+    assumedMaterialKey: "Grade 2 Steel (HB 360)",
+    qualityNumber: 12,
+    overloadFactor: 1,
+    shiftCycles: 1,
+  });
+  assert.equal(result.geometrySupported, false);
+  assert.equal(result.torquePass, true);
+  assert.equal(result.bendingPass, true);
+  assert.equal(result.contactPass, true);
+  assert.equal(result.pass, true);
 });
 
 test("cycle life uses shifts times loaded pinion revolutions per shift", () => {
@@ -56,14 +90,23 @@ test("cycle life uses shifts times loaded pinion revolutions per shift", () => {
 test("requested 5:1 comparison pairs preserve ratio and trade size for lower tooth load", () => {
   const small = calculateShifterDesign({ pinionTeeth: 12, gearTeeth: 60 }).result;
   const medium = calculateShifterDesign({ pinionTeeth: 14, gearTeeth: 70 }).result;
+  const largerMedium = calculateShifterDesign({ pinionTeeth: 15, gearTeeth: 75 }).result;
   const large = calculateShifterDesign({ pinionTeeth: 16, gearTeeth: 80 }).result;
+  const largest = calculateShifterDesign({ pinionTeeth: 18, gearTeeth: 90 }).result;
   assert.equal(small.ratio, 5);
   assert.equal(medium.ratio, 5);
+  assert.equal(largerMedium.ratio, 5);
   assert.equal(large.ratio, 5);
+  assert.equal(largest.ratio, 5);
   assert.ok(small.centerDistanceMm < medium.centerDistanceMm);
-  assert.ok(medium.centerDistanceMm < large.centerDistanceMm);
+  assert.ok(medium.centerDistanceMm < largerMedium.centerDistanceMm);
+  assert.ok(largerMedium.centerDistanceMm < large.centerDistanceMm);
+  assert.ok(large.centerDistanceMm < largest.centerDistanceMm);
   assert.ok(small.tangentialForceN > medium.tangentialForceN);
-  assert.ok(medium.tangentialForceN > large.tangentialForceN);
+  assert.ok(medium.tangentialForceN > largerMedium.tangentialForceN);
+  assert.ok(largerMedium.tangentialForceN > large.tangentialForceN);
+  assert.ok(large.tangentialForceN > largest.tangentialForceN);
+  assert.equal(largest.geometrySupported, true);
 });
 
 test("unsupported pressure angle and invalid physical inputs are rejected", () => {

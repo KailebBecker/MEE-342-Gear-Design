@@ -4,13 +4,17 @@ import {
 
 export const SHIFTER_DEFAULTS = {
   motorTorqueNm: 1.99,
-  motorSpeedRpm: 6480,
+  motorSpeedMode: "estimated",
+  motorSpeedRpm: 3240,
+  motorKv: 270,
+  operatingVoltageV: 12,
   pinionTeeth: 12,
   gearTeeth: 60,
   diametralPitch: 20,
   pressureAngleDeg: 20,
   faceWidthMm: 12.7,
-  materialKey: "Carburized & Hardened (Grade 2)",
+  materialKey: "Unknown / Not Selected",
+  assumedMaterialKey: "Grade 1 Steel (HB 180)",
   qualityNumber: 6,
   overloadFactor: 1.5,
   requiredOutputTorqueNm: 9.8,
@@ -25,7 +29,7 @@ export const SHIFTER_DEFAULTS = {
 };
 
 const numericInputs = [
-  "motorTorqueNm", "motorSpeedRpm", "pinionTeeth", "gearTeeth", "diametralPitch",
+  "motorTorqueNm", "motorSpeedRpm", "motorKv", "operatingVoltageV", "pinionTeeth", "gearTeeth", "diametralPitch",
   "pressureAngleDeg", "faceWidthMm", "qualityNumber", "overloadFactor",
   "requiredOutputTorqueNm", "bendingSafetyFactorRequired", "contactSafetyFactorRequired",
   "meshEfficiency", "shiftCycles", "pinionRevolutionsPerShift", "reliability",
@@ -43,7 +47,7 @@ export function calculateShifterDesign(inputs) {
   if (errors.length) return { errors, warnings: [], result: null };
 
   const positiveInputs = [
-    "motorTorqueNm", "motorSpeedRpm", "diametralPitch", "faceWidthMm", "overloadFactor",
+    "motorTorqueNm", "motorSpeedRpm", "motorKv", "operatingVoltageV", "diametralPitch", "faceWidthMm", "overloadFactor",
     "requiredOutputTorqueNm", "bendingSafetyFactorRequired", "contactSafetyFactorRequired",
     "shiftCycles", "pinionRevolutionsPerShift", "rimThicknessFactor",
   ];
@@ -62,19 +66,30 @@ export function calculateShifterDesign(inputs) {
   if (values.meshEfficiency > 1) errors.push("Mesh efficiency must not exceed 1.");
   if (![0.9, 0.99, 0.999, 0.9999].includes(values.reliability)) errors.push("Choose a reliability supported by the project material data.");
   if (values.temperatureC < 0 || values.temperatureC > 120) errors.push("The project temperature factor is only defined as KT = 1 from 0 to 120 °C.");
-  if (!MATERIALS[values.materialKey]) errors.push("Select a material from the project material library.");
+  if (!MATERIALS[values.assumedMaterialKey]) errors.push("Select a temporary assumed material from the project material library.");
+  if (values.materialKey !== "Unknown / Not Selected" && !MATERIALS[values.materialKey]) errors.push("Select a listed gear material or Unknown / Not Selected.");
+  if (!["direct", "estimated"].includes(values.motorSpeedMode)) errors.push("Choose direct RPM or Kv × operating-voltage speed mode.");
   if (errors.length) return { errors, warnings: [], result: null };
+
+  const motorSpeedEstimateRpm = values.motorKv * values.operatingVoltageV;
+  const motorSpeedUsedRpm = values.motorSpeedMode === "estimated" ? motorSpeedEstimateRpm : values.motorSpeedRpm;
+  const effectiveMaterialKey = values.materialKey === "Unknown / Not Selected" ? values.assumedMaterialKey : values.materialKey;
 
   const warnings = [
     "J is the existing project's curve-fit to the AGMA/Shigley 20° full-depth geometry chart, not a tooth-specific chart lookup.",
     "Km uses the existing project's precision-enclosed, uncrowned-gear assumption; confirm this matches the shifter housing and alignment.",
     "Material allowable stress values and life/reliability factors are inherited from the existing project library and method; verify the selected gear heat treatment and load-cycle interpretation before release.",
-    "Motor speed defaults to 6480 rpm (270 kV × 24 V no-load); replace it with measured or specified loaded speed.",
+    values.motorSpeedMode === "estimated"
+      ? `Motor speed is an estimated no-load value (${values.motorKv} Kv × ${values.operatingVoltageV} V = ${motorSpeedEstimateRpm} rpm); loaded speed may differ.`
+      : "Motor speed uses the directly entered RPM value.",
   ];
+  if (values.materialKey === "Unknown / Not Selected") {
+    warnings.push(`Actual gear material is not selected. Stress calculations temporarily use assumed ${effectiveMaterialKey} properties from the project library.`);
+  }
   const minimumTeeth = Math.ceil(2 / Math.sin(values.pressureAngleDeg * Math.PI / 180) ** 2);
   const geometrySupported = values.pinionTeeth >= minimumTeeth && values.gearTeeth >= minimumTeeth;
   if (!geometrySupported) {
-    warnings.push(`Standard unshifted 20° full-depth teeth need at least ${minimumTeeth} teeth to avoid the basic undercut limit. Profile shift is not modeled; geometry cannot receive PASS.`);
+    warnings.push(`STANDARD GEOMETRY WARNING: The ${values.pinionTeeth}-tooth pinion is below the ${minimumTeeth}-tooth minimum for ${values.pressureAngleDeg}° standard full-depth involute teeth. Profile modification is not modeled; investigate profile modification or a different pinion tooth count. Profile shifting is not assumed.`);
   }
 
   const ratio = values.gearTeeth / values.pinionTeeth;
@@ -89,10 +104,10 @@ export function calculateShifterDesign(inputs) {
   const lifeCycles = values.shiftCycles * values.pinionRevolutionsPerShift;
   const KL = getKL(lifeCycles);
   const KR = getKR(values.reliability);
-  const material = MATERIALS[values.materialKey];
+  const material = MATERIALS[effectiveMaterialKey];
   const bendingAllowableMPa = (material.sigma_b * KL) / (KT * KR);
   const contactAllowableMPa = (material.sigma_c * Math.sqrt(KL)) / (KT * Math.sqrt(KR));
-  const velocityMs = Math.PI * (pitchDiameterPinionMm / 1000) * values.motorSpeedRpm / 60;
+  const velocityMs = Math.PI * (pitchDiameterPinionMm / 1000) * motorSpeedUsedRpm / 60;
   const JPinion = getJ(values.pinionTeeth);
   const JGear = getJ(values.gearTeeth);
   const contactGeometryFactor = getI(values.pressureAngleDeg, ratio);
@@ -117,13 +132,16 @@ export function calculateShifterDesign(inputs) {
   const bendingPass = bendingSafety >= values.bendingSafetyFactorRequired;
   const contactPass = contactSafety >= values.contactSafetyFactorRequired;
   const stressPass = bendingPass && contactPass;
-  const pass = geometrySupported && torquePass && bendingPass && contactPass;
+  const pass = torquePass && bendingPass && contactPass;
 
   return {
     errors,
     warnings,
     result: {
       ...values,
+      effectiveMaterialKey,
+      motorSpeedEstimateRpm,
+      motorSpeedUsedRpm,
       ratio,
       moduleMm,
       pitchDiameterPinionMm,
@@ -138,7 +156,7 @@ export function calculateShifterDesign(inputs) {
       torquePass,
       bendingPass,
       contactPass,
-      outputSpeedRpm: values.motorSpeedRpm / ratio,
+      outputSpeedRpm: motorSpeedUsedRpm / ratio,
       velocityMs,
       tangentialForceN,
       radialForceN,
