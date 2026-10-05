@@ -1,103 +1,7 @@
 import { useState, useCallback } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from "recharts";
-
-// ============================================================
-// AGMA / SHIGLEY CALCULATION LIBRARY
-// ============================================================
-
-// J: Bending Geometry Factor — curve-fit to AGMA/Shigley Table 14-6 for 20° full-depth spur gears
-const getJ = (N) => {
-  if (N < 17) return 0.245;
-  if (N > 100) return 0.485;
-  return Math.min(0.485, 0.32 * Math.log(N) - 0.154);
-};
-
-// I: Contact (Pitting Resistance) Geometry Factor — Shigley Eq. 14-23
-// I = (sin(phi)*cos(phi)) / 2 * (mG / (mG+1))  for spur gears (mN=1)
-const getI = (phi_deg, mG) => {
-  const phi = phi_deg * Math.PI / 180;
-  return (Math.sin(phi) * Math.cos(phi)) / 2 * (mG / (mG + 1));
-};
-
-// Kv: Dynamic Factor — AGMA quality-number method, Shigley Eq. 14-27
-// V in ft/min; Qv = gear quality number (6=commercial, 11=precision)
-const getKv = (V_ms, Qv = 6) => {
-  const B = 0.25 * Math.pow(12 - Qv, 2 / 3);
-  const A = 50 + 56 * (1 - B);
-  const V_ftmin = V_ms * 196.85;
-  return Math.pow((A + Math.sqrt(200 * V_ftmin)) / A, B);
-};
-
-// Ks: Size Factor — Shigley Eq. 14-24
-// Ks = 1.192*(F*sqrt(Y)/Pd)^0.0535; Y ≈ pi*J (Lewis from AGMA J)
-const getKs = (F_mm, m_mm, J) => {
-  const F_in = F_mm / 25.4;
-  const Pd = 25.4 / m_mm;
-  const Y = Math.PI * J;
-  return Math.max(1.0, 1.192 * Math.pow((F_in * Math.sqrt(Y)) / Pd, 0.0535));
-};
-
-// Km: Load Distribution Factor — Shigley Eq. 14-30 (precision enclosed gearing)
-const getKm = (F_mm, d_p_mm) => {
-  const F_in = F_mm / 25.4;
-  const d_in = d_p_mm / 25.4;
-  const Cmc = 1.0; // uncrowned teeth
-  const Ce = 1.0;  // precision enclosed
-
-  // Cpf: face load distribution
-  const ratio = F_in / (10 * d_in);
-  let Cpf;
-  if (F_in <= 1) Cpf = ratio - 0.025;
-  else if (F_in <= 17) Cpf = ratio - 0.0375 + 0.0125 * F_in;
-  else Cpf = ratio - 0.1109 + 0.0207 * F_in - 0.000228 * F_in * F_in;
-  Cpf = Math.max(0, Cpf);
-
-  // Cpm: pinion proportion modifier
-  const Cpm = (F_in / d_in <= 0.175) ? 1.0 : 1.1;
-
-  // Cma: mesh alignment, precision enclosed (AGMA Table 14-9)
-  let Cma;
-  if (F_in <= 6) Cma = 0.0675 + 0.0128 * F_in - 0.926e-3 * F_in * F_in;
-  else Cma = 0.00360 + 0.0102 * F_in - 0.822e-4 * F_in * F_in;
-  Cma = Math.max(0.01, Cma);
-
-  return 1 + Cmc * (Cpf * Cpm + Cma * Ce);
-};
-
-// KB: Rim thickness factor = 1.0 (solid blank)
-const KB = 1.0;
-
-// Cp: Elastic coefficient steel/steel = 191 MPa^0.5 (AGMA 218.01)
-// Valid when Wt in N, d_p in mm, F in mm (all mm/N → yields MPa directly)
-const Cp = 191.0;
-
-// ============================================================
-// MATERIAL LIBRARY (Shigley Table 14-3 / 14-4)
-// sigma_b = allowable bending stress number (MPa)
-// sigma_c = allowable contact stress number (MPa)
-// ============================================================
-const MATERIALS = {
-  "Grade 1 Steel (HB 180)":             { sigma_b: 241,  sigma_c: 793,  HB: 180 },
-  "Grade 1 Steel (HB 300)":             { sigma_b: 290,  sigma_c: 993,  HB: 300 },
-  "Grade 2 Steel (HB 300)":             { sigma_b: 310,  sigma_c: 1069, HB: 300 },
-  "Grade 2 Steel (HB 360)":             { sigma_b: 345,  sigma_c: 1172, HB: 360 },
-  "Carburized & Hardened (Grade 1)":    { sigma_b: 380,  sigma_c: 1380, HB: 600 },
-  "Carburized & Hardened (Grade 2)":    { sigma_b: 450,  sigma_c: 1550, HB: 600 },
-};
-
-// KL: Bending Life Factor (Shigley Fig. 14-14 curve-fit)
-const getKL = (cycles) => {
-  if (cycles <= 1e4)  return 2.70;
-  if (cycles <= 3e6)  return Math.max(1.0, 1.6756 * Math.pow(cycles, -0.0323));
-  return Math.max(0.785, 1.3558 * Math.pow(cycles, -0.0178));
-};
-
-// KR: Reliability Factor (Shigley Table 14-10)
-const KR_TABLE = { 0.9: 0.85, 0.99: 1.00, 0.999: 1.25, 0.9999: 1.50 };
-const getKR = (rel) => KR_TABLE[rel] ?? 1.0;
-
-// KT: Temperature Factor = 1.0 for T <= 120°C
-const KT = 1.0;
+import { Cp, getI, getJ, getKL, getKm, getKR, getKs, getKv, KB, KT, MATERIALS } from "./gearCalculations.js";
+import ShifterMode from "./ShifterMode.jsx";
 
 // ============================================================
 // CORE GEAR DESIGN — Shigley Chapter 14 workflow
@@ -446,7 +350,7 @@ export default function App() {
   };
 
   const genTractiveMulti = () => {
-    const P = +power * 1000, wb = P / +Tpeak, rho = 1.225, eta = 0.97, data = [];
+    const P = +power * 1000, wb = P / +Tpeak, eta = 0.97, data = [];
     const Rs = [6, 8, 9.04, 12, 14];
     for (let v = 0.5; v <= 30; v += 0.5) {
       const pt = { "Speed (m/s)": +v.toFixed(1) };
@@ -509,28 +413,28 @@ export default function App() {
     setSafetyData(data);
     setTab("graphs");
   };
-  const TABS = ["inputs", "single", "twospeed", "graphs"];
-  const TLABELS = { inputs: "⚙ Inputs", single: "📐 Single Stage", twospeed: "🔁 Two-Speed", graphs: "📊 Graphs" };
+  const TABS = ["inputs", "single", "twospeed", "graphs", "shifter"];
+  const TLABELS = { inputs: "⚙ Inputs", single: "📐 Single Stage", twospeed: "🔁 Two-Speed", graphs: "📊 Graphs", shifter: "Shifter" };
 
   return (
-    <div style={{ fontFamily: "ui-monospace, 'Cascadia Code', monospace", background: "#020c1b", minHeight: "100vh", color: "#e2e8f0", maxWidth: 960, margin: "auto", padding: "20px 20px 60px" }}>
+    <div style={{ fontFamily: "ui-monospace, 'Cascadia Code', monospace", background: "#020c1b", minHeight: "100vh", color: "#e2e8f0", width: "100%", maxWidth: 1000, boxSizing: "border-box", margin: "auto", padding: "20px 20px 60px" }}>
 
       {/* Header */}
       <div style={{ marginBottom: 22, borderBottom: "1px solid #0a1e35", paddingBottom: 14 }}>
-        <div style={{ fontSize: 10, letterSpacing: "0.25em", color: "#0ea5e9", marginBottom: 2 }}>SHIGLEY · AGMA · EV GEARBOX</div>
+        <div style={{ fontSize: 10, letterSpacing: "0.25em", color: "#0ea5e9", marginBottom: 2 }}>{tab === "shifter" ? "SHIGLEY · AGMA · FORMULA SAE SHIFTER" : "SHIGLEY · AGMA · EV GEARBOX"}</div>
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900, color: "#f1f5f9" }}>Spur Gear Design Tool</h1>
-        <div style={{ color: "#334155", fontSize: 12, marginTop: 2 }}>Tesla Model 3 RWD Benchmark · Two-Speed Optimizer</div>
+        {tab !== "shifter" && <div style={{ color: "#334155", fontSize: 12, marginTop: 2 }}>Tesla Model 3 RWD Benchmark · Two-Speed Optimizer</div>}
       </div>
 
       {/* Mode */}
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+      {tab !== "shifter" && <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
         <Btn active={mode === "simple"} onClick={() => setMode("simple")}>Simple</Btn>
         <Btn active={mode === "advanced"} onClick={() => setMode("advanced")}>Advanced</Btn>
         <span style={{ color: "#1e3a5f", fontSize: 11 }}>{mode === "advanced" ? "Max center distance constraint active" : "No packaging constraint"}</span>
-      </div>
+      </div>}
 
       {/* Tabs */}
-      <div style={{ display: "flex", borderBottom: "1px solid #0a1e35", marginBottom: 18 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", borderBottom: "1px solid #0a1e35", marginBottom: 18 }}>
         {TABS.map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: "7px 16px", border: "none", cursor: "pointer", fontFamily: "inherit",
@@ -540,6 +444,8 @@ export default function App() {
           }}>{TLABELS[t]}</button>
         ))}
       </div>
+
+      {tab === "shifter" && <ShifterMode />}
 
       {/* ── INPUTS ── */}
       {tab === "inputs" && (<>
