@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from "recharts";
 import { Cp, getI, getJ, getKL, getKm, getKR, getKs, getKv, KB, KT, MATERIALS } from "./gearCalculations.js";
-import ShifterMode from "./ShifterMode.jsx";
+import ShifterWorkflow from "./ShifterWorkflow.jsx";
 
 // ============================================================
 // CORE GEAR DESIGN — Shigley Chapter 14 workflow
@@ -445,7 +445,7 @@ export default function App() {
         ))}
       </div>
 
-      {tab === "shifter" && <ShifterMode />}
+      {tab === "shifter" && <ShifterWorkflow />}
 
       {/* ── INPUTS ── */}
       {tab === "inputs" && (<>
