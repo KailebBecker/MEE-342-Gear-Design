@@ -114,8 +114,10 @@ export function calculateShifterDesign(inputs) {
   const outputTorqueNm = inputTorqueNm * ratio * values.meshEfficiency;
   const torqueMarginNm = outputTorqueNm - values.requiredOutputTorqueNm;
   const torquePass = torqueMarginNm >= 0;
-  const stressPass = bendingSafety >= values.bendingSafetyFactorRequired && contactSafety >= values.contactSafetyFactorRequired;
-  const pass = geometrySupported && torquePass && stressPass;
+  const bendingPass = bendingSafety >= values.bendingSafetyFactorRequired;
+  const contactPass = contactSafety >= values.contactSafetyFactorRequired;
+  const stressPass = bendingPass && contactPass;
+  const pass = geometrySupported && torquePass && bendingPass && contactPass;
 
   return {
     errors,
@@ -134,6 +136,8 @@ export function calculateShifterDesign(inputs) {
       outputTorqueNm,
       torqueMarginNm,
       torquePass,
+      bendingPass,
+      contactPass,
       outputSpeedRpm: values.motorSpeedRpm / ratio,
       velocityMs,
       tangentialForceN,

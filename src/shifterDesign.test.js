@@ -20,6 +20,26 @@ test("output torque includes reduction and mesh efficiency", () => {
   assert.equal(result.torquePass, false);
 });
 
+test("torque, bending, and contact checks are independent", () => {
+  const candidate = calculateShifterDesign().result;
+  const lowerTorqueRequirement = calculateShifterDesign({ requiredOutputTorqueNm: 9.0 }).result;
+  const higherStrengthRequirements = calculateShifterDesign({
+    bendingSafetyFactorRequired: 2,
+    contactSafetyFactorRequired: 2,
+  }).result;
+
+  assert.equal(candidate.torquePass, false);
+  assert.equal(candidate.bendingPass, true);
+  assert.equal(candidate.contactPass, false);
+  assert.equal(lowerTorqueRequirement.torquePass, true);
+  assert.equal(lowerTorqueRequirement.bendingPass, candidate.bendingPass);
+  assert.equal(lowerTorqueRequirement.contactPass, candidate.contactPass);
+  assert.equal(higherStrengthRequirements.torquePass, candidate.torquePass);
+  assert.equal(higherStrengthRequirements.outputTorqueNm, candidate.outputTorqueNm);
+  assert.equal(higherStrengthRequirements.bendingPass, false);
+  assert.equal(higherStrengthRequirements.contactPass, false);
+});
+
 test("12-tooth pinion remains calculable but cannot receive geometry PASS", () => {
   const { result, warnings } = calculateShifterDesign();
   assert.equal(result.geometrySupported, false);
