@@ -139,7 +139,7 @@ const simulate0to60 = (G1, G2, v_shift, power_kW, T_peak, m_veh, r_w, Cd, A, rho
 // UI PRIMITIVES
 // ============================================================
 const Card = ({ title, accent, children }) => (
-  <div style={{
+  <div className="app-card" style={{
     border: `1px solid ${accent || "#1e3a5f"}`, borderRadius: 10, padding: 18,
     marginBottom: 16, background: "#040f1e",
     boxShadow: accent ? `0 0 12px ${accent}18` : "none"
@@ -178,7 +178,7 @@ const Sel = ({ options, ...props }) => (
 );
 
 const Btn = ({ active, color, children, ...props }) => (
-  <button style={{
+  <button className="app-button" style={{
     padding: "8px 16px", marginRight: 6, marginBottom: 6, borderRadius: 7,
     border: `1px solid ${color || (active ? "#38bdf8" : "#1e3a5f")}`,
     background: active ? "#0c2a4a" : color ? `${color}18` : "#081424",
@@ -417,10 +417,11 @@ export default function App() {
   const TLABELS = { inputs: "⚙ Inputs", single: "📐 Single Stage", twospeed: "🔁 Two-Speed", graphs: "📊 Graphs", shifter: "Shifter" };
 
   return (
-    <div style={{ fontFamily: "ui-monospace, 'Cascadia Code', monospace", background: "#020c1b", minHeight: "100vh", color: "#e2e8f0", width: "100%", maxWidth: 1000, boxSizing: "border-box", margin: "auto", padding: "20px 20px 60px" }}>
+    <div className="app-shell" style={{ fontFamily: "ui-monospace, 'Cascadia Code', monospace", minHeight: "100vh", color: "#e2e8f0", width: "100%", maxWidth: 1000, boxSizing: "border-box", margin: "auto", padding: "20px 20px 60px" }}>
 
       {/* Header */}
-      <div style={{ marginBottom: 22, borderBottom: "1px solid #0a1e35", paddingBottom: 14 }}>
+      <div className="app-header" style={{ marginBottom: 22, borderBottom: "1px solid #0a1e35", paddingBottom: 14 }}>
+        <div className="brand-line"><span className="brand-gear" aria-hidden="true">⚙</span>MEE 342 GEAR DESIGN</div>
         <div style={{ fontSize: 10, letterSpacing: "0.25em", color: "#0ea5e9", marginBottom: 2 }}>{tab === "shifter" ? "SHIGLEY · AGMA · FORMULA SAE SHIFTER" : "SHIGLEY · AGMA · EV GEARBOX"}</div>
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900, color: "#f1f5f9" }}>Spur Gear Design Tool</h1>
         {tab !== "shifter" && <div style={{ color: "#334155", fontSize: 12, marginTop: 2 }}>Tesla Model 3 RWD Benchmark · Two-Speed Optimizer</div>}
@@ -436,7 +437,7 @@ export default function App() {
       {/* Tabs */}
       <div style={{ display: "flex", flexWrap: "wrap", borderBottom: "1px solid #0a1e35", marginBottom: 18 }}>
         {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
+          <button key={t} className="app-tab" aria-current={tab === t ? "page" : undefined} onClick={() => setTab(t)} style={{
             padding: "7px 16px", border: "none", cursor: "pointer", fontFamily: "inherit",
             background: "transparent", fontWeight: tab === t ? 700 : 400, fontSize: 12,
             color: tab === t ? "#38bdf8" : "#334155",
@@ -445,6 +446,7 @@ export default function App() {
         ))}
       </div>
 
+      <div key={tab} className="app-screen">
       {tab === "shifter" && <ShifterWorkflow />}
 
       {/* ── INPUTS ── */}
@@ -594,8 +596,9 @@ export default function App() {
           {!motorData.length && !tractiveData.length && !accelData.length && (
             <div style={{ color: "#334155", padding: 40, textAlign: "center" }}>Generate graphs from the Inputs tab.</div>
           )}
-        </div>
+          </div>
       )}
+      </div>
     </div>
   );
 }

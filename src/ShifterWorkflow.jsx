@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MATERIALS } from "./gearCalculations.js";
 import { calculateShifterDesign, SHIFTER_DEFAULTS } from "./shifterDesign.js";
+import { getGearAnimationTiming, getGearMeshPhaseDegrees, getShiftRotationAngles } from "./gearAnimation.js";
 
 const PAIRS = [[12, 60], [14, 70], [15, 75], [16, 80], [18, 90]];
 const INPUT_STYLE = { width: "100%", boxSizing: "border-box", padding: "8px 9px", border: "1px solid #314a5c", borderRadius: 4, background: "#071622", color: "#e6edf3", fontSize: 13 };
@@ -87,56 +88,91 @@ function Stepper({ id, label, value, onChange }) {
   return <div style={{ display: "grid", gap: 5 }}>
     <label htmlFor={id} style={{ color: "#bac8d1", fontSize: 11 }}>{label}</label>
     <span style={{ display: "grid", gridTemplateColumns: "34px minmax(55px, 90px) 34px auto", gap: 5, alignItems: "center" }}>
-      <button type="button" onClick={() => changeBy(-1)} aria-label={`Decrease ${label}`} style={STEP_STYLE}>−</button>
+      <button type="button" className="tooth-step-button" onClick={() => changeBy(-1)} aria-label={`Decrease ${label}`} style={STEP_STYLE}>−</button>
       <input id={id} aria-label={label} type="number" min="12" max="200" step="1" value={value} onChange={onChange} style={{ ...INPUT_STYLE, textAlign: "center" }} />
-      <button type="button" onClick={() => changeBy(1)} aria-label={`Increase ${label}`} style={STEP_STYLE}>+</button>
+      <button type="button" className="tooth-step-button" onClick={() => changeBy(1)} aria-label={`Increase ${label}`} style={STEP_STYLE}>+</button>
       <span style={{ color: "#8496a4", fontSize: 10 }}>teeth</span>
     </span>
   </div>;
 }
 const STEP_STYLE = { height: 34, border: "1px solid #375368", borderRadius: 4, background: "#102332", color: "#dbe7ed", fontSize: 18, cursor: "pointer" };
 
-function GearShape({ teeth, outerRadius, rootRadius, centerX, centerY, color }) {
+function GearShape({ teeth, outerRadius, rootRadius, color }) {
   const points = [];
   for (let tooth = 0; tooth < teeth; tooth += 1) {
     const base = tooth * Math.PI * 2 / teeth - Math.PI / 2;
     for (const [fraction, radius] of [[0, rootRadius], [.18, outerRadius], [.52, outerRadius], [.7, rootRadius]]) {
       const angle = base + fraction * Math.PI * 2 / teeth;
-      points.push(`${centerX + radius * Math.cos(angle)},${centerY + radius * Math.sin(angle)}`);
+      points.push(`${radius * Math.cos(angle)},${radius * Math.sin(angle)}`);
     }
   }
   return <polygon points={points.join(" ")} fill={`${color}24`} stroke={color} strokeWidth="1.5" />;
 }
 
-function GearVisualization({ result, dimension }) {
+function GearVisualization({ result, dimension, animation, onAnimationEnd, className = "" }) {
   const scale = 166 / Math.max(result.outsideDiameterPinionMm, result.outsideDiameterGearMm);
   const x1 = 120;
   const y = 112;
   const x2 = x1 + result.centerDistanceMm * scale;
   const radius = (diameter) => diameter * scale / 2;
-  return <svg viewBox="0 0 540 235" role="img" aria-label={`Scaled side view of ${result.pinionTeeth}-tooth pinion and ${result.gearTeeth}-tooth driven gear`} style={{ width: "100%", display: "block", background: "#071622", border: "1px solid #263e4f", borderRadius: 4 }}>
+  const timing = getGearAnimationTiming(result.ratio, animation.speed);
+  const driverDuration = timing.driverDurationSeconds;
+  const driverIterations = animation.mode === "shift" ? animation.loadedRevolutions : "infinite";
+  const drivenIterations = animation.mode === "shift" ? animation.loadedRevolutions / result.ratio : "infinite";
+  const driverPhase = getGearMeshPhaseDegrees(result.pinionTeeth, "driver");
+  const drivenPhase = getGearMeshPhaseDegrees(result.gearTeeth, "driven");
+  const rotorStyle = (duration, iterations, direction, angle) => ({
+    transformOrigin: "center",
+    transformBox: "fill-box",
+    animationName: animation.started && !animation.reducedMotion ? "gear-rotation" : "none",
+    animationDuration: `${duration}s`,
+    animationTimingFunction: "linear",
+    animationIterationCount: iterations,
+    animationDirection: direction,
+    animationPlayState: animation.playing ? "running" : "paused",
+    animationFillMode: animation.mode === "shift" ? "forwards" : "none",
+    transform: `rotate(${angle}deg)`,
+    transition: "transform 240ms ease-out",
+  });
+  const meshX = x1 + radius(result.pitchDiameterPinionMm);
+  return <svg className={className} viewBox="0 0 540 235" role="img" aria-label={`Scaled side view of ${result.pinionTeeth}-tooth pinion and ${result.gearTeeth}-tooth driven gear`} style={{ width: "100%", display: "block", background: "#071622", border: "1px solid #263e4f", borderRadius: 4 }}>
     <line x1="24" y1={y} x2="516" y2={y} stroke="#263b4a" strokeDasharray="4 5" />
-    <GearShape teeth={result.pinionTeeth} outerRadius={radius(result.outsideDiameterPinionMm)} rootRadius={radius(result.rootDiameterPinionMm)} centerX={x1} centerY={y} color="#5dc8b1" />
-    <GearShape teeth={result.gearTeeth} outerRadius={radius(result.outsideDiameterGearMm)} rootRadius={radius(result.rootDiameterGearMm)} centerX={x2} centerY={y} color="#e7ad59" />
-    <circle cx={x1} cy={y} r={radius(result.pitchDiameterPinionMm)} fill="none" stroke="#5dc8b1" strokeDasharray="5 4" />
-    <circle cx={x2} cy={y} r={radius(result.pitchDiameterGearMm)} fill="none" stroke="#e7ad59" strokeDasharray="5 4" />
+    <g transform={`translate(${x1} ${y})`} className="gear-position" style={{ transition: "transform 280ms cubic-bezier(.2, .75, .25, 1)" }}><g transform={`rotate(${driverPhase})`}><g className="gear-rotor gear-rotor--driver" style={rotorStyle(driverDuration, driverIterations, "normal", animation.driverAngle)} onAnimationEnd={animation.mode === "shift" ? onAnimationEnd : undefined}><GearShape key={`pinion-${result.pinionTeeth}`} teeth={result.pinionTeeth} outerRadius={radius(result.outsideDiameterPinionMm)} rootRadius={radius(result.rootDiameterPinionMm)} color="#5dc8b1" /></g></g></g>
+    <g transform={`translate(${x2} ${y})`} className="gear-position" style={{ transition: "transform 280ms cubic-bezier(.2, .75, .25, 1)" }}><g transform={`rotate(${drivenPhase})`}><g className="gear-rotor gear-rotor--driven" style={rotorStyle(driverDuration * result.ratio, drivenIterations, "reverse", animation.drivenAngle)}><GearShape key={`gear-${result.gearTeeth}`} teeth={result.gearTeeth} outerRadius={radius(result.outsideDiameterGearMm)} rootRadius={radius(result.rootDiameterGearMm)} color="#e7ad59" /></g></g></g>
+    <circle className="gear-dimension-circle" cx={x1} cy={y} r={radius(result.pitchDiameterPinionMm)} fill="none" stroke="#5dc8b1" strokeDasharray="5 4" />
+    <circle className="gear-dimension-circle" cx={x2} cy={y} r={radius(result.pitchDiameterGearMm)} fill="none" stroke="#e7ad59" strokeDasharray="5 4" />
+    <circle className={animation.playing ? "gear-mesh-marker gear-mesh-marker--active" : "gear-mesh-marker"} cx={meshX} cy={y} r="4" fill="#f4d18b" />
     <circle cx={x1} cy={y} r="3" fill="#e0e8ed" /><circle cx={x2} cy={y} r="3" fill="#e0e8ed" />
     <line x1={x1} y1="207" x2={x2} y2="207" stroke="#a2b2c1" /><line x1={x1} y1="201" x2={x1} y2="214" stroke="#a2b2c1" /><line x1={x2} y1="201" x2={x2} y2="214" stroke="#a2b2c1" />
     <text x={x1} y="229" fill="#c5d2dc" fontSize="10" textAnchor="middle">Center {dimension(result.centerDistanceMm)}</text>
-    <text x="24" y="20" fill="#5dc8b1" fontSize="10" textAnchor="start">Driver · {result.pinionTeeth}T</text>
-    <text x="516" y="20" fill="#e7ad59" fontSize="10" textAnchor="end">Driven · {result.gearTeeth}T</text>
+    <text x="24" y="20" fill="#5dc8b1" fontSize="10" textAnchor="start">Driver · {result.pinionTeeth}T · CW</text>
+    <text x="516" y="20" fill="#e7ad59" fontSize="10" textAnchor="end">Driven · {result.gearTeeth}T · CCW</text>
   </svg>;
 }
 
 function StatusCard({ title, value, required, status, explanation, preliminary = false, warning = false }) {
   const color = warning ? "#e1b75e" : status === "PASS" ? "#72d6a0" : "#ff8a7a";
-  return <article style={{ border: `1px solid ${color}66`, borderTop: `3px solid ${color}`, borderRadius: 5, padding: 12, background: "#081722", minWidth: 0 }}>
+  const icon = warning ? "△" : status === "PASS" ? "✓" : "!";
+  return <article className="result-card" style={{ border: `1px solid ${color}66`, borderTop: `3px solid ${color}`, borderRadius: 5, padding: 12, background: "#081722", minWidth: 0 }}>
     <div style={{ display: "flex", justifyContent: "space-between", gap: 5, alignItems: "center" }}><strong style={{ color: "#c8d5dd", fontSize: 10, letterSpacing: ".05em" }}>{title}</strong>{preliminary && <Provenance basis="ASSUMED" />}</div>
     <strong style={{ display: "block", color: "#f0f4f6", fontSize: 18, margin: "8px 0 3px" }}>{value}</strong>
     {required && <div style={{ color: "#99aab6", fontSize: 10 }}>{required}</div>}
-    <div style={{ color, fontSize: 10, fontWeight: 750, marginTop: 7 }}>{status}</div>
+    <div style={{ color, fontSize: 10, fontWeight: 750, marginTop: 7 }}><span aria-hidden="true" style={{ marginRight: 5 }}>{icon}</span>{status}</div>
     <p style={{ color: "#93a4b0", fontSize: 10, lineHeight: 1.45, margin: "5px 0 0" }}>{explanation}</p>
   </article>;
+}
+
+function ThresholdGauge({ label, value, target, unit, tone = "teal" }) {
+  const ceiling = Math.max(value, target, 0.01) * 1.12;
+  const valuePercent = Math.min(100, Math.max(0, value / ceiling * 100));
+  const targetPercent = Math.min(100, Math.max(0, target / ceiling * 100));
+  return <div className="threshold-gauge">
+    <div className="threshold-gauge__labels"><strong>{label}</strong><span>Calculated {value.toFixed(2)} {unit}</span><span>Required {target.toFixed(2)} {unit}</span></div>
+    <div className={`threshold-gauge__track threshold-gauge__track--${tone}`} role="img" aria-label={`${label}: calculated ${value.toFixed(2)} ${unit}; required ${target.toFixed(2)} ${unit}`}>
+      <span className="threshold-gauge__fill" style={{ width: `${valuePercent}%` }} />
+      <span className="threshold-gauge__marker" style={{ left: `${targetPercent}%` }} />
+    </div>
+  </div>;
 }
 
 function ResultCards({ result, preliminary }) {
@@ -161,7 +197,7 @@ function QuickCandidates({ inputs, selected, onChoose, dimension }) {
         const result = calculateShifterDesign({ ...inputs, pinionTeeth, gearTeeth }).result;
         const active = pinionTeeth === selected.pinionTeeth && gearTeeth === selected.gearTeeth;
         if (!result) return null;
-        return <button type="button" key={pinionTeeth} onClick={() => onChoose(pinionTeeth, gearTeeth)} aria-pressed={active} style={{ textAlign: "left", border: `1px solid ${active ? "#66cbb2" : "#2c4252"}`, borderRadius: 4, padding: 9, background: active ? "#0d2523" : "#091722", color: "#e3ebef", cursor: "pointer" }}>
+        return <button type="button" key={pinionTeeth} className="candidate-card" onClick={() => onChoose(pinionTeeth, gearTeeth)} aria-pressed={active} style={{ textAlign: "left", border: `1px solid ${active ? "#66cbb2" : "#2c4252"}`, borderRadius: 4, padding: 9, background: active ? "#0d2523" : "#091722", color: "#e3ebef", cursor: "pointer" }}>
           <strong style={{ fontSize: 11 }}>{pinionTeeth} / {gearTeeth}</strong><div style={{ color: "#9babb6", fontSize: 9, marginTop: 4 }}>5.00:1</div>
           <div style={{ color: "#9babb6", fontSize: 9 }}>Driven OD: {dimension(result.outsideDiameterGearMm)}</div>
           <div style={{ color: "#9babb6", fontSize: 9 }}>Center: {dimension(result.centerDistanceMm)}</div>
@@ -173,7 +209,7 @@ function QuickCandidates({ inputs, selected, onChoose, dimension }) {
 }
 
 function Comparison({ inputs, selected, onChoose, dimension, preliminary }) {
-  return <section style={PANEL_STYLE}>
+  return <section className="shifter-card" style={PANEL_STYLE}>
     <SectionTitle number="5" title="Compare Gear Pairs" note="Select “Use this gear pair” to load a candidate." />
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 235px), 1fr))", gap: 8 }}>
       {PAIRS.map(([pinionTeeth, gearTeeth]) => {
@@ -187,7 +223,7 @@ function Comparison({ inputs, selected, onChoose, dimension, preliminary }) {
 }
 
 function CandidateCard({ result, selected, onChoose, dimension, preliminary }) {
-  return <article style={{ border: `1px solid ${selected ? "#63cbb1" : "#2a4051"}`, borderRadius: 5, padding: 11, background: selected ? "#0b201f" : "#081723" }}>
+  return <article className="candidate-card" style={{ border: `1px solid ${selected ? "#63cbb1" : "#2a4051"}`, borderRadius: 5, padding: 11, background: selected ? "#0b201f" : "#081723" }}>
     <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}><strong style={{ color: "#e1eaf0", fontSize: 12 }}>{result.pinionTeeth}T / {result.gearTeeth}T</strong>{selected && <Provenance basis="DERIVED" />}</div>
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, margin: "10px 0", fontSize: 10 }}>
       <Metric label="Driven OD" value={dimension(result.outsideDiameterGearMm)} />
@@ -220,18 +256,83 @@ export default function ShifterWorkflow() {
   const [inputs, setInputs] = useState({ ...SHIFTER_DEFAULTS });
   const [verified, setVerified] = useState(() => Object.fromEntries(ASSUMED_KEYS.map((key) => [key, false])));
   const [dimensionUnit, setDimensionUnit] = useState("mm");
+  const [animationSpeed, setAnimationSpeed] = useState(1);
+  const [animationMode, setAnimationMode] = useState("continuous");
+  const [animationStarted, setAnimationStarted] = useState(false);
+  const [animationPlaying, setAnimationPlaying] = useState(false);
+  const [gearAngles, setGearAngles] = useState({ driver: 0, driven: 0 });
+  const [previousGeometry, setPreviousGeometry] = useState(null);
+  const [geometryRevision, setGeometryRevision] = useState(0);
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
   const assumptionsRef = useRef(null);
   const [assumptionsOpen, setAssumptionsOpen] = useState(false);
   const analysis = calculateShifterDesign(inputs);
   const result = analysis.result;
+  useEffect(() => {
+    if (!previousGeometry) return undefined;
+    const timer = setTimeout(() => setPreviousGeometry(null), 300);
+    return () => clearTimeout(timer);
+  }, [previousGeometry, geometryRevision]);
+  useEffect(() => {
+    const preference = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!preference) return undefined;
+    const handleChange = (event) => {
+      setReducedMotion(event.matches);
+      if (event.matches) {
+        setAnimationStarted(false);
+        setAnimationPlaying(false);
+        setGearAngles({ driver: 0, driven: 0 });
+      }
+    };
+    preference.addEventListener("change", handleChange);
+    return () => preference.removeEventListener("change", handleChange);
+  }, []);
+  const previewGeometryChange = () => {
+    if (!result) return;
+    setPreviousGeometry(result);
+    setGeometryRevision((revision) => revision + 1);
+  };
   const setValue = (key, value) => {
+    if (["pinionTeeth", "gearTeeth"].includes(key) && Number(value) !== Number(inputs[key])) previewGeometryChange();
     setInputs((current) => ({ ...current, [key]: value }));
     if (ASSUMED_KEYS.includes(key)) setVerified((current) => ({ ...current, [key]: false }));
     if (key === "materialKey") setVerified((current) => ({ ...current, materialRatings: false }));
+    if (["pinionTeeth", "gearTeeth"].includes(key)) resetAnimation();
   };
   const update = (key) => (event) => setValue(key, event.target.value);
   const confirm = (key) => () => setVerified((current) => ({ ...current, [key]: true }));
-  const selectPair = (pinionTeeth, gearTeeth) => setInputs((current) => ({ ...current, pinionTeeth, gearTeeth }));
+  const resetAnimation = () => {
+    setAnimationStarted(false);
+    setAnimationPlaying(false);
+    setGearAngles({ driver: 0, driven: 0 });
+  };
+  const selectPair = (pinionTeeth, gearTeeth) => {
+    if (Number(pinionTeeth) !== Number(inputs.pinionTeeth) || Number(gearTeeth) !== Number(inputs.gearTeeth)) previewGeometryChange();
+    setInputs((current) => ({ ...current, pinionTeeth, gearTeeth }));
+    resetAnimation();
+  };
+  const startAnimation = () => {
+    if (reducedMotion) return;
+    setGearAngles({ driver: 0, driven: 0 });
+    setAnimationStarted(true);
+    setAnimationPlaying(true);
+  };
+  const startShiftSimulation = () => {
+    if (reducedMotion || !verified.pinionRevolutionsPerShift || Number(inputs.pinionRevolutionsPerShift) <= 0) return;
+    setAnimationMode("shift");
+    setGearAngles({ driver: 0, driven: 0 });
+    setAnimationStarted(true);
+    setAnimationPlaying(true);
+  };
+  const finishShiftSimulation = () => {
+    if (animationMode !== "shift") return;
+    const angles = getShiftRotationAngles(Number(inputs.pinionRevolutionsPerShift), Number(result.ratio));
+    setGearAngles({ driver: angles.driverDegrees, driven: angles.drivenDegrees });
+    setAnimationStarted(false);
+    setAnimationPlaying(false);
+  };
+  const runAnimation = () => animationMode === "shift" ? startShiftSimulation() : startAnimation();
+  const shiftMotionConfirmed = verified.pinionRevolutionsPerShift && Number(inputs.pinionRevolutionsPerShift) > 0;
   const fieldProps = (key) => ({ basis: "ASSUMED", confirmed: verified[key], onConfirm: confirm(key), canConfirm: key !== "assumedMaterialKey" && (key !== "materialKey" || inputs.materialKey !== "Unknown / Not Selected") });
   const dimension = (mm, digits = 1) => dimensionUnit === "in" ? `${(mm / 25.4).toFixed(digits)} in` : `${mm.toFixed(digits)} mm`;
   const formatDimension = (mm, digits = 1) => dimensionUnit === "in" ? (mm / 25.4).toFixed(digits) : mm.toFixed(digits);
@@ -246,7 +347,7 @@ export default function ShifterWorkflow() {
   return <main style={{ maxWidth: 1000, margin: "0 auto", color: "#e2eaf0", textAlign: "left" }}>
     <header style={{ margin: "0 0 13px" }}><div style={{ color: "#65bda8", fontSize: 10, letterSpacing: ".15em" }}>FORMULA SAE · SHIFTER REDUCTION</div><h1 style={{ color: "#f1f5f7", fontSize: 23, margin: "3px 0" }}>Sequential Shifter Gear Design</h1><p style={{ color: "#899aa7", fontSize: 10, margin: 0 }}>ODrive D5065 270 kV · preliminary spur-gear sizing and comparison</p></header>
 
-    <section style={PANEL_STYLE}>
+    <section className="shifter-card" style={PANEL_STYLE}>
       <SectionTitle number="1" title="Motor & Requirement" note="Set the motor operating point and target output torque." />
       <div style={GRID_STYLE}>
         <Field id="motorTorqueNm" label="Motor torque" value={inputs.motorTorqueNm} onChange={update("motorTorqueNm")} unit="N·m" min="0.01" error={inputError("motorTorqueNm")} />
@@ -264,7 +365,7 @@ export default function ShifterWorkflow() {
       {inputs.motorSpeedMode === "estimated" && <p style={{ color: "#8698a5", fontSize: 9, margin: "8px 0 0" }}>Kv × voltage estimates no-load RPM; loaded speed depends on the motor/controller operating point. Defaults: 270 Kv, 12 V.</p>}
     </section>
 
-    <section style={PANEL_STYLE}>
+    <section className="shifter-card gear-selection-card" style={PANEL_STYLE}>
       <SectionTitle number="2" title="Gear Selection" note="Choose a pair; ratio and package dimensions update immediately.">
         <div role="group" aria-label="Dimension units" style={{ display: "inline-flex", border: "1px solid #344c5e", borderRadius: 4, overflow: "hidden" }}>{["mm", "in"].map((unit) => <button type="button" key={unit} onClick={() => setDimensionUnit(unit)} aria-pressed={dimensionUnit === unit} style={{ border: 0, padding: "5px 10px", background: dimensionUnit === unit ? "#1c3c48" : "#091722", color: "#dce6eb", cursor: "pointer", fontSize: 10 }}>{unit}</button>)}</div>
       </SectionTitle>
@@ -275,13 +376,34 @@ export default function ShifterWorkflow() {
       </div>
       {result && <>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 130px), 1fr))", gap: 8, margin: "13px 0" }}><Metric label="Pinion OD" value={dimension(result.outsideDiameterPinionMm)} /><Metric label="Driven OD" value={dimension(result.outsideDiameterGearMm)} /><Metric label="Center distance" value={dimension(result.centerDistanceMm)} /></div>
-        <GearVisualization result={result} dimension={dimension} />
-        <p style={{ color: "#8596a3", fontSize: 9, lineHeight: 1.5, margin: "5px 0 0" }}>Driver {result.pinionTeeth}T · OD {dimension(result.outsideDiameterPinionMm)} · driven {result.gearTeeth}T · OD {dimension(result.outsideDiameterGearMm)} · center {dimension(result.centerDistanceMm)} · reduction {result.ratio.toFixed(2)}:1. Dashed circles show pitch diameters; tooth form is schematic, not an involute drawing.</p>
+        <div className="gear-visual-stage">
+          {previousGeometry && <GearVisualization key={`previous-${geometryRevision}`} className="gear-visual gear-visual--outgoing" result={previousGeometry} dimension={dimension} animation={{ speed: 1, mode: "continuous", started: false, playing: false, reducedMotion: true, loadedRevolutions: 1, driverAngle: 0, drivenAngle: 0 }} />}
+          <GearVisualization key={`current-${geometryRevision}`} className={previousGeometry ? "gear-visual gear-visual--incoming" : "gear-visual"} result={result} dimension={dimension} animation={{ speed: animationSpeed, mode: animationMode, started: animationStarted, playing: animationPlaying, reducedMotion, loadedRevolutions: Number(inputs.pinionRevolutionsPerShift), driverAngle: gearAngles.driver, drivenAngle: gearAngles.driven }} onAnimationEnd={finishShiftSimulation} />
+        </div>
+        <div className="gear-animation-controls">
+          <div className="gear-control-row">
+            <button type="button" className="control-button control-button--primary" onClick={runAnimation} disabled={reducedMotion || (animationMode === "shift" && !shiftMotionConfirmed)}>{animationMode === "shift" ? "▶ Simulate Shift" : "▶ Animate"}</button>
+            <button type="button" className="control-button" onClick={() => setAnimationPlaying(false)} disabled={!animationPlaying}>⏸ Pause</button>
+            <button type="button" className="control-button" onClick={resetAnimation}>↻ Reset</button>
+            <div className="animation-speed" role="group" aria-label="Visualization speed">
+              <span>Speed</span>{[0.25, 0.5, 1, 2].map((speed) => <button type="button" key={speed} aria-pressed={animationSpeed === speed} className={animationSpeed === speed ? "is-selected" : ""} onClick={() => setAnimationSpeed(speed)}>{speed}×</button>)}
+            </div>
+          </div>
+          <div className="gear-control-row gear-mode-row" role="group" aria-label="Gear animation mode">
+            <button type="button" className={animationMode === "continuous" ? "mode-button is-selected" : "mode-button"} aria-pressed={animationMode === "continuous"} onClick={() => { setAnimationMode("continuous"); resetAnimation(); }}>Continuous Rotation</button>
+            <button type="button" className={animationMode === "shift" ? "mode-button is-selected" : "mode-button"} aria-pressed={animationMode === "shift"} disabled={!shiftMotionConfirmed || reducedMotion} title={!shiftMotionConfirmed ? "Confirm loaded pinion revolutions per shift in Detailed Shigley Analysis first." : undefined} onClick={() => { setAnimationMode("shift"); resetAnimation(); }}>Simulate Shift</button>
+            <span className="visualization-speed-note">Visualization speed scaled for display</span>
+          </div>
+          {reducedMotion && <p className="animation-note">Animation is disabled by your reduced-motion preference. Gear dimensions and results remain available.</p>}
+          {!shiftMotionConfirmed && <p className="animation-note">Shift simulation is disabled until loaded pinion revolutions per shift are confirmed in Detailed Shigley Analysis.</p>}
+        </div>
+        <div className="gear-legend"><span><i className="legend-solid" />Solid outline — outside diameter</span><span><i className="legend-dashed" />Dashed circle — pitch diameter</span><span>Animation — schematic visualization</span></div>
+        <p style={{ color: "#8596a3", fontSize: 9, lineHeight: 1.5, margin: "5px 0 0" }}>Driver {result.pinionTeeth}T · OD {dimension(result.outsideDiameterPinionMm)} · driven {result.gearTeeth}T · OD {dimension(result.outsideDiameterGearMm)} · center {dimension(result.centerDistanceMm)} · ratio {result.ratio.toFixed(2)}:1. Tooth form is schematic, not an exact manufactured involute profile.</p>
       </>}
       <QuickCandidates inputs={inputs} selected={inputs} onChoose={selectPair} dimension={dimension} />
     </section>
 
-    <section style={PANEL_STYLE}>
+    <section className="shifter-card" style={PANEL_STYLE}>
       <SectionTitle number="3" title="Gear Specification" note="Enter known geometry; confirm physical properties from the selected gear." />
       <div style={GRID_STYLE}>
         <Field id="diametralPitch" label="Diametral pitch" value={inputs.diametralPitch} onChange={update("diametralPitch")} unit="teeth/in" min="4" max="80" help="diametralPitch" error={inputError("diametralPitch")} />
@@ -294,13 +416,18 @@ export default function ShifterWorkflow() {
     </section>
 
     {result && <>
-      <section style={PANEL_STYLE}>
+      <section className="shifter-card" style={PANEL_STYLE}>
         <SectionTitle number="4" title="Results" note="Understand each requirement independently." />
         {pending.length > 0 && <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap", padding: 11, marginBottom: 10, background: "#282116", border: "1px solid #765b2e", borderRadius: 4 }}>
           <div><strong style={{ display: "block", color: "#f0c878", fontSize: 11 }}>PRELIMINARY DESIGN</strong><span style={{ color: "#bdad8e", fontSize: 9 }}>{pending.length} assumptions still need confirmation{importantPending.length ? ` · Priority: ${importantPending.join(", ")}` : ""}</span></div>
           <button type="button" onClick={() => { setAssumptionsOpen(true); requestAnimationFrame(() => assumptionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })); }} style={{ border: "1px solid #93733a", borderRadius: 4, background: "#3a2d17", color: "#f2d698", padding: "7px 10px", cursor: "pointer", fontSize: 9 }}>Review assumptions</button>
         </div>}
         <ResultCards result={result} preliminary={pending.length > 0} />
+        <div className="result-gauges">
+          <ThresholdGauge label="Output torque" value={result.outputTorqueNm} target={result.requiredOutputTorqueNm} unit="N·m" />
+          <ThresholdGauge label="Bending SF" value={result.bendingSafety} target={result.bendingSafetyFactorRequired} unit="SF" />
+          <ThresholdGauge label="Contact SF" value={result.contactSafety} target={result.contactSafetyFactorRequired} unit="SF" tone="amber" />
+        </div>
         <p style={{ color: "#8c9da8", fontSize: 9, margin: "9px 0 0" }}>Overall structural result: <strong style={{ color: result.pass ? "#85d5a8" : "#ff9386" }}>{result.pass ? "PASS" : "FAIL"}</strong>{result.pass && !result.geometrySupported ? " · Standard geometry warning remains separate." : ""} Strength values are preliminary while assumptions remain.</p>
       </section>
 
@@ -314,7 +441,7 @@ export default function ShifterWorkflow() {
 
 function DetailedAnalysis({ result, inputs, verified, warnings, formatDimension, unit, ref: assumptionsRef, assumptionsOpen, setAssumptionsOpen, importantPending, update, confirm, fieldProps, inputError }) {
   const material = MATERIALS[result.effectiveMaterialKey];
-  return <section style={PANEL_STYLE} ref={assumptionsRef}>
+  return <section className="shifter-card" style={PANEL_STYLE} ref={assumptionsRef}>
     <SectionTitle number="6" title="Detailed Shigley Analysis" note="Review input assumptions, stress results, and intermediate factors." />
     <details open={assumptionsOpen} onToggle={(event) => setAssumptionsOpen(event.currentTarget.open)}>
       <summary style={{ color: "#c5d2da", fontSize: 10, cursor: "pointer" }}>Assumptions and specifications</summary>
